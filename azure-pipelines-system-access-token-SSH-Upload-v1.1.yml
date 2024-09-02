@@ -1,0 +1,330 @@
+#######################################
+# Automation Objective:-
+# 1. Validate RG, Storage Account, Storage Account Container and SSH Private Key File.
+# 2. Copy SSH Private Key file to Build Agent.
+# 3. Copy to Artifacts Staging Directory.
+# 4. Publish Artifacts.
+# 5. Download Artifacts.
+# 6. Commit to GIT.
+# 7. Upload SSH Private Key to Pipelines Library.
+# 8. Delete the SSH Private Key from Build Agent. 
+# 9. Commit again GIT.  
+#######################################
+
+################################################################################################################################
+# Important to Note:-
+#####################
+# 1. The Consumers only need to change the values in "Declare Parameters" and "Declare Variables" Section.
+################################################################################################################################
+
+trigger:
+  none
+
+######################
+#DECLARE PARAMETERS:-
+######################
+parameters:
+- name: SUBSCRIPTIONID
+  displayName: Subscription ID Details Follow Below:-
+  type: string
+  default: 210e66cb-55cf-424e-8daa-6cad804ab604
+  values:
+  - 210e66cb-55cf-424e-8daa-6cad804ab604
+
+- name: RGNAME
+  displayName: Please Provide the Resource Group Name:-
+  type: object
+  default: Demo-Blog-RG
+
+- name: STORAGEACCOUNTNAME
+  displayName: Please Provide the Storage Account Name:-
+  type: object
+  default: am4prodvs4core4shell
+
+- name: STORAGEACCOUNTCONTAINERNAME
+  displayName: Please Provide the Storage Account Container Name:-
+  type: string
+  default: am-ssh-file
+  values:
+  - am-ssh-file
+
+- name: SSHFILENAME
+  displayName: SSH File Name Follows Below:-
+  type: string
+  default: terraform_rsa
+  values:
+  - terraform_rsa
+
+######################
+#DECLARE VARIABLES:-
+######################
+variables:
+  ServiceConnection: amcloud-cicd-service-connection # Please replace with your Service Connection!
+  BuildAgent: windows-latest # Please replace with your Build Agent. You can continue to use this as this is Microsoft Hosted Windows Build Agent!
+  envName: 'NonProd' # Please replace with your Azure Devops Environment Name 
+  RootWorkingFolderName: 'Upload-Private-SSH-Key' # Please replace with your Root Working Folder Name!
+  ChildWorkingFolderName1: 'SSH-Key' # Please replace with your Child Working Folder Name!
+  WorkingDir: '$(System.DefaultWorkingDirectory)\$(RootWorkingFolderName)\$(ChildWorkingFolderName1)' 
+  TargetFolderName: 'AMSSHUPLOAD' # Please replace with your naming convention!
+  Target: '$(build.artifactstagingdirectory)\$(TargetFolderName)'
+  Artifact: 'Upload' # Please replace with your naming convention!
+  DevopsOrgName: 'ArindamMitra0251' # Please replace with your Azure Devops Organisation Name!
+  DevopsPrjName: 'AMCLOUD' # Please replace with your Azure Devops Project Name!
+  DevopsRepoName: 'YAML-v1.0' # Please replace with your Azure Devops Repository Name!
+  DevOpsGITUser: 'AM' # Please replace with your Custom GIT Username!
+  DevOpsGITEmail: 'arindam0310018@gmail.com' # Please replace with your GIT user email address!
+
+#########################
+# DECLARE BUILD AGENTS:-
+#########################
+pool:
+  vmImage: $(BuildAgent)
+
+###################
+# DECLARE STAGES:-
+###################
+
+stages:
+
+- stage: VALIDATE_RG_SA_CONTAINER_SSHFILE
+  jobs:
+  - job: VALIDATE_RG_SA_CONTAINER_SSHFILE 
+    displayName: VALIDATE RG SA CONTAINER & SSHFILE
+    steps:
+    - task: AzureCLI@2
+      displayName: SET AZURE ACCOUNT
+      inputs:
+        azureSubscription: $(ServiceConnection)
+        scriptType: ps
+        scriptLocation: inlineScript
+        inlineScript: |
+          az --version
+          az account set --subscription ${{ parameters.SUBSCRIPTIONID }}
+          az account show  
+    - task: AzureCLI@2
+      displayName: VALIDATE RG SA CONTAINER & SSHFILE
+      inputs:
+        azureSubscription: $(ServiceConnection)
+        scriptType: ps
+        scriptLocation: inlineScript
+        inlineScript: |      
+          $i = az group exists -n ${{ parameters.RGNAME }}
+            if ($i -eq "true") {
+              echo "#####################################################"
+              echo "Resource Group ${{ parameters.RGNAME }} exists!!!"
+              echo "#####################################################"
+              $j = az storage account check-name --name ${{ parameters.STORAGEACCOUNTNAME }} --query "reason" --out tsv
+                if ($j -eq "AlreadyExists") {
+                  echo "###################################################################"
+                  echo "Storage Account ${{ parameters.STORAGEACCOUNTNAME }} exists!!!"
+                  echo "###################################################################"
+                  $k = az storage container exists --account-name ${{ parameters.STORAGEACCOUNTNAME }} --account-key $(az storage account keys list -g ${{ parameters.RGNAME }} -n ${{ parameters.STORAGEACCOUNTNAME }} --query [0].value -o tsv) --name ${{ parameters.STORAGEACCOUNTCONTAINERNAME }} --query "exists" --out tsv
+                    if ($k -eq "true") {
+                      echo "#####################################################################"
+                      echo "Container ${{ parameters.STORAGEACCOUNTCONTAINERNAME }} exists!!!"
+                      echo "#####################################################################"
+                      $l = az storage blob exists --account-name ${{ parameters.STORAGEACCOUNTNAME }} --account-key $(az storage account keys list -g ${{ parameters.RGNAME }} -n ${{ parameters.STORAGEACCOUNTNAME }} --query [0].value -o tsv) --container-name ${{ parameters.STORAGEACCOUNTCONTAINERNAME }} --name ${{ parameters.SSHFILENAME }} --query "exists" --out tsv
+                        if ($l -eq "true") {
+                          echo "#####################################################################"
+                          echo "SSH Filename ${{ parameters.SSHFILENAME }} exists!!!"
+                          echo "#####################################################################"  
+                          }
+                        else {
+                          echo "###########################################################################################################################################################################################"
+                          echo "SSH Filename ${{ parameters.SSHFILENAME }} DOES NOT EXISTS in the container ${{ parameters.STORAGEACCOUNTCONTAINERNAME }} residing inside the Resource Group ${{ parameters.RGNAME }}!!!"
+                          echo "###########################################################################################################################################################################################"
+                          exit 1  
+                        }
+                      }
+                    else {
+                      echo "####################################################################################################################################################################################################################"
+                      echo "Storage Account Container ${{ parameters.STORAGEACCOUNTCONTAINERNAME }} DOES NOT EXISTS in the Storage Account ${{ parameters.STORAGEACCOUNTNAME }} residing inside the Resource Group ${{ parameters.RGNAME }}!!!"
+                      echo "####################################################################################################################################################################################################################"
+                      exit 1    
+                    }
+                } 
+                else {
+                  echo "#######################################################################################################################"
+                  echo "Storage Account ${{ parameters.STORAGEACCOUNTNAME }} DOES NOT EXISTS in Resource Group ${{ parameters.RGNAME }}!!!"
+                  echo "#######################################################################################################################"
+                  exit 1
+                }              
+            }
+            else {
+              echo "#############################################################"
+              echo "Resource Group ${{ parameters.RGNAME }} DOES NOT EXISTS!!!"
+              echo "#############################################################"
+              exit 1
+            }
+
+- stage: COPY_PUBLISH
+  condition: succeeded()
+  jobs:
+  - job: COPY_PUBLISH
+    displayName: COPY SSH KEY 2 BUILD AGENT & PUBLISH AS ARTIFACTS
+    steps:
+    - task: AzureCLI@2
+      displayName: COPY SSH KEY 2 BUILD AGENT & PUBLISH AS ARTIFACTS
+      inputs:
+        azureSubscription: $(ServiceConnection)
+        scriptType: ps
+        scriptLocation: inlineScript
+        inlineScript: |
+          az --version
+          az account set --subscription ${{ parameters.SUBSCRIPTIONID }}
+          az account show 
+          cd $(System.DefaultWorkingDirectory)\$(RootWorkingFolderName)\$(ChildWorkingFolderName1)\
+          az storage blob download -f ${{ parameters.SSHFILENAME }} --account-name ${{ parameters.STORAGEACCOUNTNAME }} --account-key $(az storage account keys list -g ${{ parameters.RGNAME }} -n ${{ parameters.STORAGEACCOUNTNAME }} --query [0].value -o tsv) --container-name ${{ parameters.STORAGEACCOUNTCONTAINERNAME }} --name ${{ parameters.SSHFILENAME }}
+          echo "#####################"
+          echo "Listing the contents in the current directory:-"
+          dir
+          echo "#####################"
+          $outputPath = "$(System.DefaultWorkingDirectory)\$(RootWorkingFolderName)\$(ChildWorkingFolderName1)\${{ parameters.SSHFILENAME }}"
+          if (Test-Path $outputPath) {
+             Write-Host "${{ parameters.SSHFILENAME }} copied successfully."
+             } 
+          else {
+                Write-Host "${{ parameters.SSHFILENAME }} was NOT Copied."
+                exit 1
+                }
+          echo "########################################"
+    
+###############################################
+# Copy Files to Artifacts Staging Directory:-
+###############################################
+    - task: CopyFiles@2
+      displayName: COPY FILES ARTIFACTS STAGING DIRECTORY
+      inputs:
+        SourceFolder: '$(workingDir)'
+        Contents: |
+          **/*${{ parameters.SSHFILENAME }}
+        TargetFolder: '$(Target)'
+
+########################
+# Publish Artifacts:-
+########################
+    - task: PublishBuildArtifacts@1
+      displayName: PUBLISH ARTIFACTS
+      inputs:
+        targetPath: '$(Target)'
+        artifactName: '$(Artifact)'     
+
+#############################
+# STAGE: COMMIT AND UPLOAD:-
+#############################
+
+- stage: COMMIT_2_GIT_UPLOAD
+  condition: succeeded('COPY_PUBLISH')
+  jobs:
+  - deployment: 
+    displayName: COMMIT_2_GIT_UPLOAD
+    environment: $(envName)
+    pool:
+      vmImage: '$(BuildAgent)'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self 
+            persistCredentials: true
+
+#########################
+# Download Artifacts:-
+#########################
+          - task: DownloadBuildArtifacts@0
+            displayName: DOWNLOAD ARTIFACTS
+            inputs:
+              buildType: 'current'
+              downloadType: 'single'
+              artifactName: '$(Artifact)'
+              downloadPath: '$(System.ArtifactsDirectory)'
+
+#########################################
+# Commit 2 Git and Publish:-
+# Authentication - System Access Token
+#########################################
+          - task: PowerShell@2
+            displayName: Commit 2 GIT 
+            inputs:
+              targetType: 'inline'
+              script: |
+                cd $(System.DefaultWorkingDirectory)\$(RootWorkingFolderName)\$(ChildWorkingFolderName1)
+                cp $(System.ArtifactsDirectory)\$(Artifact)\$(TargetFolderName)\${{ parameters.SSHFILENAME }} . 
+                echo "#####################"
+                echo "SSH Private Key copied!"
+                echo "Listing the contents in the current directory:-"
+                dir
+                echo "#####################"
+                git remote -v
+                echo "#####################"
+                git remote set-url origin https://$(System.AccessToken)@dev.azure.com/$(DevopsOrgName)/$(DevopsPrjName)/_git/$(DevopsRepoName)
+                echo "#####################"
+                git ls-remote origin
+                echo "#####################"
+                git config --global user.email "$(DevOpsGITEmail)"
+                git config --global user.name "$(DevOpsGITUser)"
+                git config --global --unset https.proxy
+                git checkout -b $(Build.SourceBranchName)
+                git add .
+                git commit -m "SSH Private Key Committed!!!"
+                git push origin $(Build.SourceBranchName)
+
+          - task: PowerShell@2
+            displayName: UPLOAD SECURE FILE
+            enabled: true
+            inputs:
+              targetType: 'inline'
+              script: |
+                $header = @{ Authorization = "Bearer $env:SYSTEM_ACCESSTOKEN" }
+                $infile = "./$(RootWorkingFolderName)/$(ChildWorkingFolderName1)/${{ parameters.SSHFILENAME }}"
+                $uri = "https://dev.azure.com/$(DevopsOrgName)/36aaac58-e06f-47ed-8b98-003ad670ee3c/_apis/distributedtask/securefiles?api-version=5.0-preview.1&name=${{ parameters.SSHFILENAME }}"      
+                pwd
+                ls
+                Invoke-RestMethod -Method Post -Uri $uri -ContentType "application/octet-stream" -Headers $header -InFile "$infile"
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+#######################################
+# STAGE: DELETE SSH FILE FROM REPO:-
+#######################################
+
+- stage: DELETE_SSHFILE_REPO
+  condition: succeeded('COMMIT_2_GIT_UPLOAD')
+  jobs:
+  - job: DELETE_SSHFILE_REPO
+    displayName: DELETE SSH FILE FROM REPO
+    steps:
+    - task: PowerShell@2
+      displayName: DELETE SSH FILE FROM REPO
+      inputs:
+        targetType: 'inline'
+        script: |
+          cd $(System.DefaultWorkingDirectory)\$(RootWorkingFolderName)\$(ChildWorkingFolderName1)
+          echo "Listing the contents in the current directory:-"
+          dir
+          echo "#####################"
+          git remote -v
+          echo "#####################"
+          git remote set-url origin https://$(System.AccessToken)@dev.azure.com/$(DevopsOrgName)/$(DevopsPrjName)/_git/$(DevopsRepoName)
+          echo "#####################"
+          git ls-remote origin
+          echo "#####################"
+          git config --global user.email "$(DevOpsGITEmail)"
+          git config --global user.name "$(DevOpsGITUser)"
+          git config --global --unset https.proxy
+          echo "###################################################################"
+          echo "Perform GIT PULL:-"
+          git pull origin $(Build.SourceBranchName)
+          echo "###################################################################"
+          git checkout -b $(Build.SourceBranchName)
+          echo "###################################################################"
+          echo "Listing the contents in the current directory after GIT PULL:-"
+          dir
+          echo "###################################################################"
+          echo "Delete the SSH Private Key"
+          rm ${{ parameters.SSHFILENAME }}
+          echo "SSH Private Key ${{ parameters.SSHFILENAME }} deleted successfully!!!"
+          echo "###################################################################"
+          git add .
+          git commit -m "Deleted SSH Private Key from local!!!"
+          git push origin $(Build.SourceBranchName)
